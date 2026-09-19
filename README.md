@@ -108,7 +108,6 @@ The project includes visual analysis of the dataset and model performance, inclu
 * Correlation analysis
 * Model performance comparison
 * Confusion matrices
-* `[Other plots actually present in the project]`
 
 ## Technology Stack
 
@@ -125,7 +124,8 @@ The project includes visual analysis of the dataset and model performance, inclu
 **Machine Learning**
 
 * Scikit-learn
-* `[Other libraries actually used]`
+* Tensorflow
+* Keras
 
 **Visualization**
 
