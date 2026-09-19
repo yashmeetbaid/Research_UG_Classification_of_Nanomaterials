@@ -1,155 +1,170 @@
 import numpy as np
-import pandas as pd
+import tensorflow as tf
 
-from sklearn.datasets import make_classification
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Flatten, Dense
+from tensorflow.keras.applications import ResNet50
 
 
-def create_test_dataset():
+INPUT_SHAPE = (224, 224, 3)
+NUM_CLASSES = 2
+
+
+def build_test_model():
     """
-    Generate a small deterministic dataset for unit testing.
+    Build the same architecture used in the project,
+    but without downloading ImageNet weights.
 
-    This dataset is only used to verify that the ML pipeline
-    behaves correctly.
+    This makes the test fast and reproducible.
     """
 
-    X, y = make_classification(
-        n_samples=200,
-        n_features=10,
-        n_informative=6,
-        n_redundant=2,
-        n_classes=2,
-        random_state=42
+    base_model = ResNet50(
+        weights=None,
+        include_top=False,
+        input_shape=INPUT_SHAPE
     )
 
-    return X, y
+    model = Sequential([
+        base_model,
+        Flatten(),
+        Dense(
+            NUM_CLASSES,
+            activation="softmax"
+        )
+    ])
 
+    # Same transfer-learning strategy as the project
+    for layer in base_model.layers[:-1]:
+        layer.trainable = False
 
-def train_model(X_train, y_train):
-    """Train the classification model."""
-
-    model = RandomForestClassifier(
-        n_estimators=50,
-        random_state=42
+    model.compile(
+        optimizer="adam",
+        loss="categorical_crossentropy",
+        metrics=["accuracy"]
     )
-
-    model.fit(X_train, y_train)
 
     return model
 
 
-def test_dataset_has_expected_shape():
-    """Verify that the generated test dataset has valid dimensions."""
+def test_model_can_be_created():
+    """
+    Verify that the ResNet50-based model can be
+    constructed successfully.
+    """
 
-    X, y = create_test_dataset()
-
-    assert X.shape[0] == 200
-    assert X.shape[1] == 10
-    assert len(y) == 200
-
-
-def test_train_test_split():
-    """Verify that the train/test split behaves correctly."""
-
-    X, y = create_test_dataset()
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
-    )
-
-    assert len(X_train) == 160
-    assert len(X_test) == 40
-    assert len(y_train) == 160
-    assert len(y_test) == 40
-
-
-def test_model_can_be_trained():
-    """Verify that the model can successfully learn from the data."""
-
-    X, y = create_test_dataset()
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
-    )
-
-    model = train_model(X_train, y_train)
+    model = build_test_model()
 
     assert model is not None
-    assert hasattr(model, "predict")
+
+
+def test_model_output_shape():
+    """
+    Verify that the model produces one probability
+    for each target class.
+    """
+
+    model = build_test_model()
+
+    assert model.output_shape == (
+        None,
+        NUM_CLASSES
+    )
+
+
+def test_model_is_compiled():
+    """
+    Verify that the model is compiled with the expected
+    loss function and optimizer.
+    """
+
+    model = build_test_model()
+
+    assert model.optimizer is not None
+    assert model.loss == (
+        "categorical_crossentropy"
+    )
 
 
 def test_prediction_shape():
-    """Verify that predictions match the number of test samples."""
-
-    X, y = create_test_dataset()
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
-    )
-
-    model = train_model(X_train, y_train)
-
-    predictions = model.predict(X_test)
-
-    assert len(predictions) == len(y_test)
-
-
-def test_predictions_are_valid_classes():
-    """Verify that predictions contain only known class labels."""
-
-    X, y = create_test_dataset()
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
-    )
-
-    model = train_model(X_train, y_train)
-
-    predictions = model.predict(X_test)
-
-    unique_classes = set(np.unique(y))
-
-    assert set(np.unique(predictions)).issubset(unique_classes)
-
-
-def test_model_accuracy_is_reasonable():
     """
-    Basic regression test to ensure the model is actually
-    learning rather than producing random predictions.
+    Verify that predictions have the expected dimensions.
     """
 
-    X, y = create_test_dataset()
+    model = build_test_model()
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
+    test_images = np.random.random(
+        (2, 224, 224, 3)
+    ).astype(np.float32)
+
+    predictions = model.predict(
+        test_images,
+        verbose=0
     )
 
-    model = train_model(X_train, y_train)
+    assert predictions.shape == (
+        2,
+        NUM_CLASSES
+    )
 
-    predictions = model.predict(X_test)
 
-    accuracy = accuracy_score(y_test, predictions)
+def test_predictions_form_probabilities():
+    """
+    Verify that softmax predictions form valid probability
+    distributions.
+    """
 
-    assert accuracy >= 0.70
+    model = build_test_model()
+
+    test_images = np.random.random(
+        (2, 224, 224, 3)
+    ).astype(np.float32)
+
+    predictions = model.predict(
+        test_images,
+        verbose=0
+    )
+
+    # Every probability should be between 0 and 1
+    assert np.all(predictions >= 0)
+    assert np.all(predictions <= 1)
+
+    # Probabilities for each sample should sum to ~1
+    assert np.allclose(
+        predictions.sum(axis=1),
+        1.0,
+        atol=1e-5
+    )
+
+
+def test_model_has_trainable_layers():
+    """
+    Verify that the model contains trainable parameters
+    after the transfer-learning configuration.
+    """
+
+    model = build_test_model()
+
+    trainable_parameters = sum(
+        np.prod(variable.shape)
+        for variable in model.trainable_variables
+    )
+
+    assert trainable_parameters > 0
+
+
+def test_model_accepts_expected_input():
+    """
+    Verify that the model accepts the image dimensions
+    expected by ResNet50.
+    """
+
+    model = build_test_model()
+
+    input_shape = model.input_shape
+
+    assert input_shape == (
+        None,
+        224,
+        224,
+        3
+    )
