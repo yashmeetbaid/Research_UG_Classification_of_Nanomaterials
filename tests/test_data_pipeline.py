@@ -1,131 +1,176 @@
 import os
-import cv2
 import numpy as np
 import pytest
+import tensorflow as tf
 
-from sklearn.model_selection import train_test_split
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+
+IMAGE_SIZE = (224, 224)
+BATCH_SIZE = 8
 
 
 def create_test_dataset(base_dir):
     """
-    Creates a temporary image dataset with the same
-    class-folder structure expected by the project.
-
-    Example:
-        dataset/
-        ├── class_a/
-        │   ├── image_1.jpg
-        │   ├── image_2.jpg
-        │   └── image_3.jpg
-        └── class_b/
-            ├── image_1.jpg
-            ├── image_2.jpg
-            └── image_3.jpg
+    Create a small temporary image dataset with the same
+    directory structure expected by flow_from_directory().
     """
 
     classes = ["class_a", "class_b"]
 
-    for class_name in classes:
-        class_dir = base_dir / class_name
-        class_dir.mkdir(parents=True)
+    for split in ["train", "val", "test"]:
 
-        for i in range(3):
-            image = np.zeros((100, 100, 3), dtype=np.uint8)
+        for class_name in classes:
 
-            # Give each image different pixel values
-            image[:] = i * 50
+            class_dir = base_dir / split / class_name
+            class_dir.mkdir(parents=True)
 
-            image_path = class_dir / f"image_{i}.jpg"
+            for i in range(2):
 
-            success = cv2.imwrite(
-                str(image_path),
-                image
-            )
+                image = np.random.randint(
+                    0,
+                    256,
+                    size=(224, 224, 3),
+                    dtype=np.uint8
+                )
 
-            assert success
+                image_path = class_dir / f"image_{i}.jpg"
+
+                tf.keras.utils.save_img(
+                    str(image_path),
+                    image
+                )
 
 
-def test_images_are_discovered(tmp_path):
+def create_generator(directory):
     """
-    Verify that JPG images are correctly discovered
-    from class-specific directories.
-    """
-
-    dataset_dir = tmp_path / "dataset"
-
-    create_test_dataset(dataset_dir)
-
-    image_list = list(dataset_dir.glob("*/*.jpg"))
-
-    assert len(image_list) == 6
-
-    for image_path in image_list:
-        assert image_path.suffix.lower() == ".jpg"
-
-
-def test_dataset_is_split_correctly(tmp_path):
-    """
-    Verify that the dataset can be split into training
-    and validation subsets.
+    Create the same type of generator used by the project.
     """
 
-    dataset_dir = tmp_path / "dataset"
-
-    create_test_dataset(dataset_dir)
-
-    image_list = list(dataset_dir.glob("*/*.jpg"))
-
-    train_samples, validation_samples = train_test_split(
-        image_list,
-        test_size=0.2,
-        random_state=42
+    datagen = ImageDataGenerator(
+        preprocessing_function=
+        tf.keras.applications.resnet50.preprocess_input
     )
 
-    assert len(train_samples) == 4
-    assert len(validation_samples) == 2
-
-    # No sample should appear in both sets
-    assert set(train_samples).isdisjoint(
-        set(validation_samples)
+    return datagen.flow_from_directory(
+        directory,
+        target_size=IMAGE_SIZE,
+        batch_size=BATCH_SIZE,
+        class_mode="categorical",
+        shuffle=False
     )
 
 
-def test_split_is_reproducible(tmp_path):
+def test_dataset_directories_exist(tmp_path):
     """
-    Verify that using random_state=42 produces
-    the same split every time.
+    Verify that train, validation and test directories
+    can be created and detected.
     """
 
-    dataset_dir = tmp_path / "dataset"
+    create_test_dataset(tmp_path)
 
-    create_test_dataset(dataset_dir)
+    assert (tmp_path / "train").exists()
+    assert (tmp_path / "val").exists()
+    assert (tmp_path / "test").exists()
 
-    image_list = list(dataset_dir.glob("*/*.jpg"))
 
-    train_1, test_1 = train_test_split(
-        image_list,
-        test_size=0.2,
-        random_state=42
+def test_class_directories_exist(tmp_path):
+    """
+    Verify that each dataset split contains the expected
+    class-specific directories.
+    """
+
+    create_test_dataset(tmp_path)
+
+    for split in ["train", "val", "test"]:
+
+        assert (
+            tmp_path / split / "class_a"
+        ).exists()
+
+        assert (
+            tmp_path / split / "class_b"
+        ).exists()
+
+
+def test_generator_detects_correct_number_of_classes(tmp_path):
+    """
+    Verify that flow_from_directory correctly identifies
+    the number of classes.
+    """
+
+    create_test_dataset(tmp_path)
+
+    generator = create_generator(
+        str(tmp_path / "train")
     )
 
-    train_2, test_2 = train_test_split(
-        image_list,
-        test_size=0.2,
-        random_state=42
+    assert generator.num_classes == 2
+
+
+def test_generator_detects_images(tmp_path):
+    """
+    Verify that images are correctly loaded by the
+    TensorFlow data generator.
+    """
+
+    create_test_dataset(tmp_path)
+
+    generator = create_generator(
+        str(tmp_path / "train")
     )
 
-    assert train_1 == train_2
-    assert test_1 == test_2
+    assert generator.samples == 4
 
 
-def test_empty_dataset_is_detected(tmp_path):
+def test_image_batch_shape(tmp_path):
     """
-    Verify that an empty dataset is correctly detected.
+    Verify that generated image batches have the expected
+    ResNet50 input dimensions.
     """
 
-    dataset_dir = tmp_path / "empty_dataset"
-    dataset_dir.mkdir()
+    create_test_dataset(tmp_path)
 
-    image_list = list(dataset_dir.glob("*/*.jpg"))
+    generator = create_generator(
+        str(tmp_path / "train")
+    )
 
-    assert len(image_list) == 0
+    images, labels = next(generator)
+
+    assert images.shape[1:] == (
+        224,
+        224,
+        3
+    )
+
+
+def test_label_batch_shape(tmp_path):
+    """
+    Verify that categorical labels have the correct
+    number of classes.
+    """
+
+    create_test_dataset(tmp_path)
+
+    generator = create_generator(
+        str(tmp_path / "train")
+    )
+
+    images, labels = next(generator)
+
+    assert labels.shape[1] == 2
+
+
+def test_test_generator_is_not_shuffled(tmp_path):
+    """
+    The test generator should preserve ordering so that
+    predictions can be correctly compared with true labels.
+    """
+
+    create_test_dataset(tmp_path)
+
+    generator = create_generator(
+        str(tmp_path / "test")
+    )
+
+    assert generator.shuffle is False
